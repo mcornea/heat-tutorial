@@ -1,0 +1,121 @@
+heat_template_version: 2013-05-23
+
+description: Template that installs a wordpress server.
+
+parameters:
+  image:
+    type: string
+    description: >
+      Name or ID of the image to use for the instance.
+    constraints:
+      - custom_constraint: glance.image
+        description: Must identify an image known to Glance
+  flavor:
+    type: string
+    description: Flavor for the instance to be created
+    default: m1.small
+    constraints:
+      - custom_constraint: nova.flavor
+        description: Must be a flavor known to Nova
+  key_name:
+    type: string
+    description: Name of an existing key pair to use for the instance
+    constraints:
+      - custom_constraint: nova.keypair
+        description: Must name a public key (pair) known to Nova
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach server to.
+    default: private
+  DBIp:
+    description: The database server IP address
+    type: string
+    default: '10.10.10.10'
+  DBName:
+    description: The WordPress database name
+    type: string
+    default: wordpress
+  DBUsername:
+    description: The WordPress database username
+    type: string
+    default: admin
+  DBPassword:
+    type: string
+    default: admin
+    hidden: true
+    constraints:
+      - length: { min: 5, max: 41 }
+        description: password must be between 5 and 41 characters
+      - allowed_pattern: '[a-zA-Z0-9]*'
+        description: must contain only alphanumeric characters.
+
+resources:
+  wait_condition:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: wh }
+      count: 1
+      timeout: 600
+
+  wh:
+    type: OS::Heat::WaitConditionHandle
+
+  security_group:
+      type: OS::Neutron::SecurityGroup
+      properties:
+        name: web_server_security_group
+        rules:
+          - protocol: tcp
+            port_range_min: 80
+            port_range_max: 80
+
+  port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: private_network }
+      security_groups:
+        - { get_resource: security_group }
+
+  wordpress_instance:
+    type: OS::Nova::Server
+    properties:
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - port: { get_resource: port }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $db_address: { get_param: DBIp }
+            $db_name: { get_param: DBName }
+            $db_username: { get_param: DBUsername }
+            $db_userpass: { get_param: DBPassword }
+            wc_notify: { get_attr: ['wh', 'curl_cli'] }
+          template: |
+            #!/bin/bash -ex
+            yum install -y httpd
+            systemctl start httpd
+            systemctl enable httpd
+            yum install -y wordpress
+            sed -i "/Deny from All/d" /etc/httpd/conf.d/wordpress.conf
+            sed -i "s/Require local/Require all granted/" /etc/httpd/conf.d/wordpress.conf
+            sed -i -e s/database_name_here/$db_name/ -e s/username_here/$db_username/ -e s/password_here/$db_userpass/ -e s/localhost/$db_address/ /usr/share/wordpress/wp-config.php
+            setsebool httpd_can_network_connect_db 1
+            systemctl restart httpd
+
+            # notify heat that we are done here
+            wc_notify --data-binary '{"status": "SUCCESS"}'
+
+outputs:
+  name:
+    description: Name of the wordpress instance.
+    value: { get_attr: [wordpress_instance, name] }
+  ip:
+    description: The IP address of the wordpress instance.
+    value: { get_attr: [wordpress_instance, first_address] }
+  port:
+    description: The network port of the wordpress instance.
+    value: { get_resource: port }

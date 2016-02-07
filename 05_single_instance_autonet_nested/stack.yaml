@@ -1,0 +1,51 @@
+heat_template_version: 2013-05-23
+
+description: Simple template to deploy a single compute instance
+
+parameters:
+  key_name:
+    type: string
+    description: Name of an existing key pair to use for the server
+    constraints:
+      - custom_constraint: nova.keypair
+  flavor:
+    type: string
+    description: Flavor for the server to be created
+    default: m1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  image:
+    type: string
+    description: Image ID or image name to use for the server
+    constraints:
+      - custom_constraint: glance.image
+  public_network:
+    type: string
+    label: Public network name or ID
+    description: Public network with floating IP addresses.
+    default: public
+
+resources:
+  network:
+    type: lib/private_network.yaml
+    properties:
+      public_network: { get_param: public_network }
+
+  instance:
+    type: lib/server.yaml
+    properties:
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      private_network: { get_attr: [network, name] }
+
+  floating_ip:
+    type: lib/floating_ip.yaml
+    properties:
+      port: { get_attr: [instance, port] }
+      public_network: { get_param: public_network }
+
+outputs:
+  ip:
+    description: The public IP address to access the instance.
+    value: { get_attr: [floating_ip, ip] }

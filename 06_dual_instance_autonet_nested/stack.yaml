@@ -1,0 +1,88 @@
+heat_template_version: 2013-05-23
+
+description: Simple template to deploy a single compute instance
+
+parameters:
+  key_name:
+    type: string
+    description: Name of an existing key pair to use for the server
+    constraints:
+      - custom_constraint: nova.keypair
+  flavor:
+    type: string
+    description: Flavor for the server to be created
+    default: m1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  image:
+    type: string
+    description: Image ID or image name to use for the server
+    constraints:
+      - custom_constraint: glance.image
+  public_network:
+    type: string
+    label: Public network name or ID
+    description: Public network with floating IP addresses.
+    default: public
+  DBRootPassword:
+    description: Root password for MySQL
+    type: string
+    default: admin
+    hidden: true
+    constraints:
+      - length: { min: 5, max: 41 }
+        description: password must be between 5 and 41 characters
+      - allowed_pattern: '[a-zA-Z0-9]*'
+        description: must contain only alphanumeric characters.
+  DBName:
+    description: The WordPress database name
+    type: string
+    default: wordpress
+  DBUsername:
+    description: The WordPress database username
+    type: string
+    default: admin
+  DBPassword:
+    type: string
+    default: admin
+    hidden: true
+    constraints:
+      - length: { min: 5, max: 41 }
+        description: password must be between 5 and 41 characters
+      - allowed_pattern: '[a-zA-Z0-9]*'
+        description: must contain only alphanumeric characters.
+
+
+resources:
+  network:
+    type: lib/private_network.yaml
+    properties:
+      public_network: { get_param: public_network }
+
+  mysql:
+    type: lib/mysql.yaml
+    properties:
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      private_network: { get_attr: [network, name] }
+
+  apache:
+    type: lib/apache.yaml
+    properties:
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      private_network: { get_attr: [network, name] }
+      DBIp: { get_attr: [mysql, ip] }
+
+  floating_ip:
+    type: lib/floating_ip.yaml
+    properties:
+      port: { get_attr: [apache, port] }
+      public_network: { get_param: public_network }
+
+outputs:
+  ip:
+    description: The public IP address to access the instance.
+    value: { get_attr: [floating_ip, ip] }
